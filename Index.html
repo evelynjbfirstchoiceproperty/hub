@@ -235,6 +235,7 @@ const EPH_GOOGLE_WEB_APP_URL='https://script.google.com/macros/s/AKfycbwV9hNDWFB
     pending.set(id,{resolve,reject,timer});
     bridgeReady.then(()=>{if(!pending.has(id))return;try{frame.contentWindow.postMessage({type:'EPH_RPC_REQUEST',id,payload},'*');}catch(e){pending.delete(id);clearTimeout(timer);reject(e);}});
   });}
+  window.EPH_GOOGLE_RPC=rpc;
   function jsonResponse(data,status=200,extraHeaders={}){const headers=new Headers({'Content-Type':'application/json; charset=utf-8',...extraHeaders});return new Response(data===null||data===undefined?'':JSON.stringify(data),{status,headers});}
   async function parseBody(body){if(body==null||body==='')return null;if(typeof body==='string'){try{return JSON.parse(body)}catch(_){return body}}return body;}
   async function googleFetch(url,init={}){
@@ -331,18 +332,24 @@ const EPH_REQUIREMENT_FORM='https://docs.google.com/forms/d/e/1FAIpQLScVa1dLYI3U
 function showLogin(){document.getElementById('loginGate').classList.add('show');document.getElementById('adminEmail').focus()}
 function closeLogin(){document.getElementById('loginGate').classList.remove('show')}
 function showCustomer(){document.getElementById('customerView').style.display='block';document.getElementById('adminApp').style.display='none';closeLogin();window.scrollTo(0,0)}
-function showAdmin(){
- const email=(document.getElementById('adminEmail').value||'').trim();
- const password=document.getElementById('adminPassword').value||'';
- if(!email||!password){document.getElementById('loginError').textContent='Enter your Admin email and password.';return}
- document.getElementById('loginError').textContent='Checking Google backend authentication…';
- fetch(EPH_SUPABASE_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{'Content-Type':'application/json','apikey':EPH_SUPABASE_KEY},body:JSON.stringify({email,password})})
- .then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.msg||d.message||d.error_description||'Sign-in failed. Check your authorized admin account.');
- window.EPH_ADMIN_SESSION={access_token:d.access_token,refresh_token:d.refresh_token,user:d.user};
- document.getElementById('customerView').style.display='none';document.getElementById('adminApp').style.display='grid';closeLogin();
- const aside=document.querySelector('#adminApp .aside-bottom'); if(aside)aside.innerHTML='<b>✦ Evelyn Property Hub</b><p>Authenticated admin session</p><span class="pill green">Google backend · Signed in</span><button class="btn small" style="margin-top:10px;width:100%" onclick="signOutAdmin()">Sign out</button>';
- nav('dashboard');Promise.allSettled([loadCRMData(),loadCloudListings()]).then(()=>{render();});checkSupabaseStatus();window.scrollTo(0,0);
- }).catch(e=>{document.getElementById('loginError').textContent=e.message;});
+async function showAdmin(){
+  const email=(document.getElementById('adminEmail').value||'').trim();
+  const password=document.getElementById('adminPassword').value||'';
+  const error=document.getElementById('loginError');
+  if(!email||!password){error.textContent='Enter your Admin email and password.';return}
+  error.textContent='Checking Google Apps Script authentication…';
+  try{
+    if(typeof window.EPH_GOOGLE_RPC!=='function')throw new Error('Google backend bridge is not ready. Refresh the page and try again.');
+    const result=await window.EPH_GOOGLE_RPC({action:'adminLogin',email,password});
+    if(!result||result.ok===false||!result.accessToken)throw new Error(result&&result.message||result&&result.error||'Google sign-in failed. Check your authorized admin account and Apps Script deployment.');
+    window.EPH_ADMIN_SESSION={access_token:result.accessToken,refresh_token:result.refreshToken||result.accessToken,user:result.user||{email}};
+    document.getElementById('customerView').style.display='none';document.getElementById('adminApp').style.display='grid';closeLogin();
+    const aside=document.querySelector('#adminApp .aside-bottom');
+    if(aside)aside.innerHTML='<b>✦ Evelyn Property Hub</b><p>Authenticated admin session</p><span class="pill green">Google Sheets / Drive · Signed in</span><button class="btn small" style="margin-top:10px;width:100%" onclick="signOutAdmin()">Sign out</button>';
+    nav('dashboard');
+    Promise.allSettled([loadCRMData(),loadCloudListings()]).then(()=>{render();});
+    checkSupabaseStatus();window.scrollTo(0,0);
+  }catch(e){error.textContent=e&&e.message?e.message:'Google sign-in failed.';}
 }
 function signOutAdmin(){window.EPH_ADMIN_SESSION=null;showCustomer()}
 function openFormLink(){window.open(EPH_REQUIREMENT_FORM,'_blank','noopener');}
